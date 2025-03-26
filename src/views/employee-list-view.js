@@ -1,13 +1,15 @@
 import { LitElement, html, css } from 'lit';
 import '../components/table.js';
+import '../components/delete-confirmation.js';
+import { Router } from '@vaadin/router';
 
 export class EmployeeListView extends LitElement {
   static properties = {
     employees: { type: Array },
-    selectedEmployees: { type: Array },
     currentPage: { type: Number },
     pageSize: { type: Number },
-    totalEmployees: { type: Number }
+    selectedEmployee: { type: Object },
+    showDeleteModal: { type: Boolean }
   };
 
   static styles = css`
@@ -80,9 +82,12 @@ export class EmployeeListView extends LitElement {
       color: #666;
       cursor: pointer;
       font-size: 20px;
+      padding: 4px 8px;
+      border-radius: 4px;
     }
 
     .view-toggle button:hover {
+      background: #f5f5f5;
       color: #333;
     }
 
@@ -110,6 +115,11 @@ export class EmployeeListView extends LitElement {
       display: flex;
       align-items: center;
       gap: 8px;
+      cursor: pointer;
+    }
+
+    .language-selector:hover {
+      background: #f5f5f5;
     }
 
     @media (max-width: 768px) {
@@ -138,10 +148,24 @@ export class EmployeeListView extends LitElement {
   constructor() {
     super();
     this.employees = [];
-    this.selectedEmployees = [];
     this.currentPage = 1;
     this.pageSize = 10;
-    this.totalEmployees = 0;
+    this.selectedEmployee = null;
+    this.showDeleteModal = false;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._stateChangedHandler = (e) => {
+      this.employees = e.detail.employees;
+      this.requestUpdate();
+    };
+    document.addEventListener('employees-state-changed', this._stateChangedHandler);
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener('employees-state-changed', this._stateChangedHandler);
+    super.disconnectedCallback();
   }
 
   render() {
@@ -153,7 +177,7 @@ export class EmployeeListView extends LitElement {
         </div>
         <div class="header-right">
           <div>👥 Employees</div>
-          <button class="add-button">
+          <button class="add-button" @click=${this._handleAddNew}>
             <span>+</span>
             Add New
           </button>
@@ -179,13 +203,29 @@ export class EmployeeListView extends LitElement {
           .selectable=${true}
           .page=${this.currentPage}
           .pageSize=${this.pageSize}
-          .totalItems=${this.totalEmployees}
-          @row-select=${this._handleRowSelect}
-          @row-action=${this._handleRowAction}
+          .totalItems=${this.employees.length}
           @page-change=${this._handlePageChange}
+          @row-action=${this._handleRowAction}
         ></lit-table>
+
+        <delete-confirmation
+          .isOpen=${this.showDeleteModal}
+          .employeeName=${this.selectedEmployee ? `${this.selectedEmployee.firstName} ${this.selectedEmployee.lastName}` : ''}
+          @cancel=${this._handleCancelDelete}
+          @proceed=${this._handleConfirmDelete}
+        ></delete-confirmation>
       </div>
     `;
+  }
+
+  getPaginatedData() {
+    const start = (this.currentPage - 1) * this.pageSize;
+    const end = start + this.pageSize;
+    return this.employees.slice(start, end);
+  }
+
+  _handlePageChange(e) {
+    this.currentPage = e.detail.page;
   }
 
   getColumns() {
@@ -194,16 +234,8 @@ export class EmployeeListView extends LitElement {
       { field: 'lastName', header: 'Last Name' },
       { field: 'dateOfEmployment', header: 'Date of Employment' },
       { field: 'dateOfBirth', header: 'Date of Birth' },
-      { 
-        field: 'phone', 
-        header: 'Phone',
-        renderer: (value) => html`<a href="tel:${value}">${value}</a>`
-      },
-      { 
-        field: 'email', 
-        header: 'Email',
-        renderer: (value) => html`<a href="mailto:${value}">${value}</a>`
-      },
+      { field: 'phone', header: 'Phone' },
+      { field: 'email', header: 'Email' },
       { field: 'department', header: 'Department' },
       { field: 'position', header: 'Position' }
     ];
@@ -216,31 +248,36 @@ export class EmployeeListView extends LitElement {
     ];
   }
 
-  getPaginatedData() {
-    const start = (this.currentPage - 1) * this.pageSize;
-    const end = start + this.pageSize;
-    return this.employees.slice(start, end);
-  }
-
-  _handleRowSelect(e) {
-    this.selectedEmployees = e.detail.selectedItems;
-    this.dispatchEvent(new CustomEvent('selection-change', {
-      detail: { selectedEmployees: this.selectedEmployees }
-    }));
+  _handleAddNew() {
+    Router.go('/create');
   }
 
   _handleRowAction(e) {
     const { action, item } = e.detail;
+    
     if (action === 'edit') {
-      this.dispatchEvent(new CustomEvent('edit-employee', { detail: { employee: item } }));
+      Router.go(`/employee/edit/${item.id}`);
     } else if (action === 'delete') {
-      this.dispatchEvent(new CustomEvent('delete-employee', { detail: { employee: item } }));
+      this.selectedEmployee = item;
+      this.showDeleteModal = true;
     }
   }
 
-  _handlePageChange(e) {
-    this.currentPage = e.detail.page;
-    this.requestUpdate();
+  _handleCancelDelete() {
+    this.showDeleteModal = false;
+    this.selectedEmployee = null;
+  }
+
+  _handleConfirmDelete() {
+    if (this.selectedEmployee) {
+      this.dispatchEvent(new CustomEvent('employee-deleted', {
+        detail: { employeeId: this.selectedEmployee.id },
+        bubbles: true,
+        composed: true
+      }));
+      this.showDeleteModal = false;
+      this.selectedEmployee = null;
+    }
   }
 }
 
